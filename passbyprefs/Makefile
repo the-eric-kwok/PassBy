@@ -3,8 +3,9 @@ include $(THEOS)/makefiles/common.mk
 
 BUNDLE_NAME = PassByPrefs
 PassByPrefs_FILES = PassByRootListController.m
+PassByPrefs_CFLAGS = -fobjc-arc
 PassByPrefs_INSTALL_PATH = /Library/PreferenceBundles
-PassByPrefs_FRAMEWORKS = UIKit Message
+PassByPrefs_FRAMEWORKS = UIKit
 PassByPrefs_PRIVATE_FRAMEWORKS = Preferences MobileWiFi BluetoothManager
 
 include $(THEOS_MAKE_PATH)/bundle.mk

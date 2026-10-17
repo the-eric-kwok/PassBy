@@ -1,0 +1,14 @@
+"Security risk" = "安全风险";
+"In this version, enabling this will let your phone auto-unlock even when the watch itself is locked (but still in proximity)." = "当前版本中，启用该选项后，即使 Apple Watch 本身处于锁定状态（但在附近），设备也会自动解锁。";
+"Enable" = "启用";
+"Don't enable" = "暂不启用";
+"Unprotected network" = "未受保护的网络";
+"Adding this open network to the whitelist will make your device vulnerable.\nDO NOT enable *this* network if you are using the option \"Even when connected while locked\"." = "将此开放网络加入白名单会使设备面临风险。\n若你正在使用「锁定状态下加入网络时同样生效」选项，请勿启用此网络。";
+"\nThe selected network is also of the \"hidden\" kind. Please, really do not combine this with the aforementioned option unless you know *exactly* what yuo are doing." = "\n所选网络还是「隐藏网络」。除非你完全清楚自己在做什么，否则请勿将两者组合使用。";
+"Proceed anyway" = "仍然继续";
+"Cancel" = "取消";
+"Attach settings" = "附加设置";
+"Do you want to include your settings in the feedback?\nThis will NOT include names of WiFi or Bluetooth devices" = "是否在反馈中附带你的设置？\n不会包含 Wi-Fi 或蓝牙设备名称";
+"Yes" = "是";
+"No" = "否";
+"Feedback on PassBy" = "PassBy 反馈";

@@ -11,40 +11,36 @@
 			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>No options require to respring!</string>
+			<key>footerText</key>
+			<string>When first enabling the tweak, enter the passcode next time you unlock your device!</string>
 		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSLinkCell</string>
-			<key>detail</key>
-			<string>PassByHelpListController</string>
-			<key>label</key>
-			<string>Guide</string>
-		</dict>
-		<dict>
-			<key>icon</key>
-			<string>paypal.png</string>
-			<key>cell</key>
-			<string>PSButtonCell</string>
-			<key>label</key>
-			<string>Donate</string>
-			<key>action</key>
-			<string>donate:</string>
-		</dict>		
 		<dict>
 			<key>icon</key>
 			<string>github.png</string>
 			<key>cell</key>
 			<string>PSButtonCell</string>
 			<key>label</key>
-			<string>Source Code by Giorgio Iavicoli</string>
+			<string>Source Code</string>
 			<key>action</key>
 			<string>sourceCode:</string>
+		</dict>
+		<dict>
+			<key>icon</key>
+			<string>github.png</string>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>Send feedback</string>
+			<key>action</key>
+			<string>sendFeedback:</string>
 		</dict>
 		<dict>
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>General</string>
+			<key>footerText</key>
+			<string>Enable: enables or disables all features of this tweak.&#10;Save passcode across resprings: saves passcode so that you don't need to enter it once every respring. Your passcode will always be saved encrypted.&#10;Show last time unlocked: replaces title above passcode view with the last time the device was unlocked.&#10;Use 24h format: applies to last time unlocked and magic passcode.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -98,37 +94,9 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
-			<string>Activator – activation methods</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSLinkCell</string>
-			<key>label</key>
-			<string>Unlock and dismiss lockscreen</string>
-			<key>isController</key>
-			<true/>
-			<key>bundle</key>
-			<string>LibActivator</string>
-			<key>activatorListener</key>
-			<string>com.giorgioiavicoli.passby.unlock</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSLinkCell</string>
-			<key>label</key>
-			<string>Disable until next real unlock</string>
-			<key>isController</key>
-			<true/>
-			<key>bundle</key>
-			<string>LibActivator</string>
-			<key>activatorListener</key>
-			<string>com.giorgioiavicoli.passby.invalidate</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSGroupCell</string>
-			<key>label</key>
 			<string>Auto-unlock options</string>
+			<key>footerText</key>
+			<string>Use auto-unlock: bypasses the passcode lock when the device was unlocked within a certain period.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -185,6 +153,8 @@
 			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>Wi-Fi auto-unlock options</string>
+			<key>footerText</key>
+			<string>Use Wi-Fi auto-unlock: bypasses the passcode lock within a certain period when connected to specific Wi-Fi networks.&#10;Even when joined while locked: enables auto-unlock even if a WiFi network is joined while the phone is locked. Otherwise, the device has to be unlocked while connected to enable this feature.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -261,6 +231,8 @@
 			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>Bluetooth auto-unlock options</string>
+			<key>footerText</key>
+			<string>Use Bluetooth auto-unlock: bypasses the passcode lock within a certain period when connected to specific Bluetooth devices.&#10;Even when connected while locked: enables auto-unlock even if a Bluetooth device connects while the phone is locked. Otherwise, the device has to be unlocked while connected to enable this feature.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -337,6 +309,8 @@
 			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>Other auto-unlock options</string>
+			<key>footerText</key>
+			<string>Auto-unlock while using headphones: bypasses the passcode lock when headphones are connected (prior to locking).&#10;Auto-unlock while Watch is reachable: bypasses the passcode lock when the paired Apple Watch is nearby. Note: this does not currently check whether the Watch is unlocked.&#10;Dismiss lockscreen if no notifications: skip the lockscreen when auto-unlocking if no notifications are showing.&#10;Even when showing media controls: skip the lockscreen when auto-unlocking even if the media control are showing.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -391,6 +365,8 @@
 			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>Magic Passcode options</string>
+			<key>footerText</key>
+			<string>Use Magic Passcode: gives the ability to unlock the device with a secondary passcode. If unlocked with this code, the auto-unlock feature will temporarily be disabled.&#10;Passcode length: disable the 6-digit option if using a 4-digit passcode.&#10;Magic Passcode configuration: use values from different sources — time, date, battery, timeout, or custom digits.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -437,6 +413,8 @@
 			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>Disable options</string>
+			<key>footerText</key>
+			<string>Disable during SOS mode: disables auto-unlock and magic passcode when SOS mode is invoked (by pressing 5 times the lock button, which by default also disables Touch ID/Face ID).&#10;Disable during time interval: an interval of time during which auto-unlock and magic passcode will be disabled.&#10;Also disable Touch ID/Face ID: whether to disable Touch ID/Face ID as well during this time interval.&#10;Keep disabled until next real unlock: keeps auto-unlock and magic passcode disabled even after the specified time interval, until the next passcode unlock (or via Touch ID/Face ID, if not disabled); the tweak is reenabled only by a login after the time interval.&#10;Disable "PassBy Enabled" alert: disables the alert after entering passcode for the first time (useful if you're not saving passcode over resprings).</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -543,14 +521,6 @@
 			<string>Reset Settings</string>
 			<key>action</key>
 			<string>resetSettings:</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSButtonCell</string>
-			<key>label</key>
-			<string>Send feedback</string>
-			<key>action</key>
-			<string>sendFeedback:</string>
 		</dict>
 		<dict>
 			<key>cell</key>

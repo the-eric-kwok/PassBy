@@ -1,16 +1,13 @@
 #import <Preferences/PSListController.h>
 #import <Preferences/PSSpecifier.h>
 
-@interface PassByRootListController : PSListController<MFMailComposeViewControllerDelegate>
+@interface PassByRootListController : PSListController
 @end
 
 @interface PassByWiFiListController : PSListController
 @end
 
 @interface PassByBTListController : PSListController
-@end
-
-@interface PassByHelpListController : PSListController
 @end
 
 @interface PassByMagicPasscodeListController : PSListController
