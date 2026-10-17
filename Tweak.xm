@@ -5,6 +5,7 @@
 #import <dlfcn.h>
 #import <notify.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 
 #include "crypto.h"
 
@@ -41,6 +42,7 @@ static BOOL isKeptDisabled;
 static BOOL isManuallyDisabled;
 static BOOL isDisabledUntilNext;
 static BOOL lastLockedState;
+static BOOL springBoardReady;
 
 static int  gracePeriod;
 static int  gracePeriodOnWiFi;
@@ -71,6 +73,7 @@ static NSData   *   UUID                = nil;
 static NSDate   *   currentDay          = nil;
 static NSDate   *   lastUnlock          = nil;
 
+static NSObject *   GracePeriodSyncObj;
 static NSObject *   WiFiGracePeriodSyncObj;
 static NSObject *   BTGracePeriodSyncObj;
 static NSObject *   ManuallyDisabledSyncObj;
@@ -97,26 +100,26 @@ static BOOL isUsingWatch();
 
 #include "PassByGracePeriodHelper.h"
 
-static void savePasscodeToFile()
+static void savePasscodeToFile(NSString * passcode)
 {
-    NSMutableDictionary * passByDict =
-        [   [NSMutableDictionary alloc]
-            initWithContentsOfFile:@PLIST_PATH
-        ]?: [NSMutableDictionary new];
+    // Runs on a background queue: capture the passcode by value, never touch globals except the immutable UUID.
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0),
+        ^{
+            NSMutableDictionary * passByDict =
+                [NSMutableDictionary dictionaryWithContentsOfFile:@PLIST_PATH]
+                ?: [NSMutableDictionary dictionary];
 
-    NSData * passcodeData =
-        AES128Encrypt(
-            [truePasscode
-                dataUsingEncoding:NSUTF8StringEncoding
-            ], UUID
-        );
+            NSData * passcodeData =
+                AES128Encrypt(
+                    [passcode dataUsingEncoding:NSUTF8StringEncoding], UUID
+                );
+            if (!passcodeData)
+                return;
 
-    [passByDict
-        setObject:passcodeData
-        forKey:@"passcode"
-    ];
-    [passByDict writeToFile:@(PLIST_PATH) atomically:YES];
-    [passByDict release];
+            passByDict[@"passcode"] = passcodeData;
+            [passByDict writeToFile:@(PLIST_PATH) atomically:YES];
+        }
+    );
 }
 
 
@@ -125,93 +128,69 @@ static void savePasscodeToFile()
 - (void)_simulateLockButtonPress;
 @end
 
-static void unlockedWithPrimary(NSString * passcode)
+static void showSpringBoardAlert(NSString * title, NSString * message)
 {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
+    dispatch_async(dispatch_get_main_queue(),
         ^{
-            isInSOSMode = NO;
-            if (!truePasscode || ![truePasscode isEqualToString:passcode]) {
-                [truePasscode release];
-                truePasscode = [passcode copy];
-                if (savePasscode) {
-                    savePasscodeToFile();
-                }
-                if (!disableAlert) {
-                    dispatch_async(dispatch_get_main_queue(),
-                        ^{
-                            UIAlertController* alert = [UIAlertController
-                                alertControllerWithTitle:@"PassBy Enabled"
-                                message:@"PassBy is now enabled"
-                                preferredStyle:UIAlertControllerStyleAlert];
-                            
-                            UIAlertAction* defaultAction = [UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault
-                            handler:^(UIAlertAction * action) {}];
-                            
-                            [alert addAction:defaultAction];
-                            [[[SpringBoard sharedApplication] keyWindow].rootViewController
-                                presentViewController:alert animated:YES completion:nil];
-                        }
-                    );
-                }
-            }
+            if (!springBoardReady)
+                return;
+
+            UIViewController * rootViewController =
+                [[[SpringBoard sharedApplication] keyWindow] rootViewController];
+            if (!rootViewController)
+                return;
+
+            UIAlertController * alert =
+                [UIAlertController alertControllerWithTitle:title
+                                                    message:message
+                                             preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:
+                [UIAlertAction actionWithTitle:@"OK"
+                                         style:UIAlertActionStyleDefault
+                                       handler:^(UIAlertAction *) {}]];
+            [rootViewController presentViewController:alert animated:YES completion:nil];
         }
     );
+}
+
+// Called from the passcode hooks, always on SpringBoard's main thread.
+static void unlockedWithPrimary(NSString * passcode)
+{
+    isInSOSMode = NO;
+    if (!truePasscode || ![truePasscode isEqualToString:passcode]) {
+        truePasscode = [passcode copy];
+        if (savePasscode)
+            savePasscodeToFile(truePasscode);
+        if (!disableAlert)
+            showSpringBoardAlert(@"PassBy Enabled", @"PassBy is now enabled");
+    }
 }
 
 
 static void unlockedWithSecondary()
 {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
-        ^{
-            if (first.isGracePeriod
-            || second.isGracePeriod
-            || (passcodeLength == 6 && last.isGracePeriod)
-            ) {
-                unlockedWithTimeout = YES;
-                if (digitsGracePeriod) {
-                    if (kCFCoreFoundationVersionNumber >= 1348.00) {
-                        if (graceTimeoutTimer) {
-                            [graceTimeoutTimer invalidate];
-                            [graceTimeoutTimer release];
-                        }
-                        dispatch_async(dispatch_get_main_queue(),
-                            ^{
-                                graceTimeoutTimer = [
-                                    [NSTimer
-                                        scheduledTimerWithTimeInterval:digitsGracePeriod
-                                        repeats:NO
-                                        block:^(NSTimer *)
-                                        {
-                                            [graceTimeoutTimer invalidate];
-                                            graceTimeoutTimer = nil;
-                                            [[SpringBoard sharedApplication] _simulateLockButtonPress];
-                                        }
-                                    ] retain
-                                ];
-                            }
-                        );
-                    } else {
-                        // ToDo: move to settigns
-                        dispatch_async(dispatch_get_main_queue(),
-                            ^{
-                                UIAlertController* alert = [UIAlertController
-                                    alertControllerWithTitle:@"PassBy"
-                                    message:@"Timeout not supported below iOS 10"
-                                    preferredStyle:UIAlertControllerStyleAlert];
-                                
-                                UIAlertAction* defaultAction = [UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault
-                                handler:^(UIAlertAction * action) {}];
-                                
-                                [alert addAction:defaultAction];
-                                [[[SpringBoard sharedApplication] keyWindow].rootViewController
-                                    presentViewController:alert animated:YES completion:nil];
-                            }
-                        );
-                    }
-                }
+    if (first.isGracePeriod
+    || second.isGracePeriod
+    || (passcodeLength == 6 && last.isGracePeriod)
+    ) {
+        unlockedWithTimeout = YES;
+        if (digitsGracePeriod) {
+            if (kCFCoreFoundationVersionNumber >= 1348.00) {
+                [graceTimeoutTimer invalidate];
+                graceTimeoutTimer =
+                    [NSTimer
+                        scheduledTimerWithTimeInterval:digitsGracePeriod
+                        repeats:NO
+                        block:^(NSTimer *)
+                        {
+                            graceTimeoutTimer = nil;
+                            [[SpringBoard sharedApplication] _simulateLockButtonPress];
+                        }];
+            } else {
+                showSpringBoardAlert(@"PassBy", @"Timeout not supported below iOS 10");
             }
         }
-    );
+    }
 }
 
 @interface SBLockStateAggregator : NSObject
@@ -262,22 +241,67 @@ static BOOL checkAttemptedUnlock(NSString * passcode)
 + (id)  sharedInstance;
 
 - (BOOL)attemptUnlockWithPasscode:(NSString *)passcode;
-//- (void)attemptUnlockWithPasscode:(NSString *)passcode completion:(/*^block*/id)arg2 ;
 
 - (BOOL)_attemptUnlockWithPasscode:(NSString *)passcode finishUIUnlock:(BOOL)arg2;
-//- (BOOL)_attemptUnlockWithPasscode:(NSString *)passcode mesa:(BOOL)arg2 finishUIUnlock:(BOOL)arg3 ;
 - (BOOL)_attemptUnlockWithPasscode:(NSString *)passcode mesa:(BOOL)arg2 finishUIUnlock:(BOOL)arg3 completion:(/*^block*/id)arg4 ;
 
 - (SBLockScreenViewControllerBase *) lockScreenViewController;
 - (CSCoverSheetViewController     *) coverSheetViewController;
 @end
 
-static void unlockDevice(BOOL finishUIUnlock)
+static BOOL isLockScreenUIReady()
 {
-    [   [SBLockScreenManager sharedInstance]
-        _attemptUnlockWithPasscode:truePasscode
-        finishUIUnlock: finishUIUnlock
-    ];
+    SBLockScreenManager * manager = [SBLockScreenManager sharedInstance];
+    if (!manager)
+        return NO;
+
+    if (kCFCoreFoundationVersionNumber >= 1665.15) // iOS >= 13.0
+        return [manager coverSheetViewController] != nil;
+
+    return [manager lockScreenViewController] != nil;
+}
+
+// Replays the stored passcode through whichever unlock entry point exists at
+// runtime. SpringBoard must have finished launching and the lock screen UI
+// must be in place: calling unlock too early during a respring startup is
+// what soft-bricks the device on an endless spinner.
+static BOOL unlockDevice(BOOL finishUIUnlock)
+{
+    if (!springBoardReady || !isLockScreenUIReady())
+        return NO;
+
+    if (!truePasscode
+    ||  ([truePasscode length] != 4 && [truePasscode length] != 6)
+    )
+        return NO;
+
+    SBLockScreenManager * manager = [SBLockScreenManager sharedInstance];
+    if (!manager)
+        return NO;
+
+    if (class_getInstanceMethod([manager class],
+            @selector(_attemptUnlockWithPasscode:mesa:finishUIUnlock:completion:)))
+        return ((BOOL (*)(id, SEL, id, BOOL, BOOL, id))objc_msgSend)(
+            manager,
+            @selector(_attemptUnlockWithPasscode:mesa:finishUIUnlock:completion:),
+            truePasscode, NO, finishUIUnlock, nil
+        );
+
+    if (class_getInstanceMethod([manager class],
+            @selector(_attemptUnlockWithPasscode:finishUIUnlock:)))
+        return ((BOOL (*)(id, SEL, id, BOOL))objc_msgSend)(
+            manager,
+            @selector(_attemptUnlockWithPasscode:finishUIUnlock:),
+            truePasscode, finishUIUnlock
+        );
+
+    if (class_getInstanceMethod([manager class],
+            @selector(attemptUnlockWithPasscode:)))
+        return ((BOOL (*)(id, SEL, id))objc_msgSend)(
+            manager, @selector(attemptUnlockWithPasscode:), truePasscode
+        );
+
+    return NO;
 }
 
 @interface SBFAuthenticationRequest : NSObject
@@ -297,13 +321,15 @@ static void unlockDevice(BOOL finishUIUnlock)
     }
 
     if (checkAttemptedUnlock(passcode)) {
-        if (%orig(truePasscode)) {
+        BOOL secondaryUnlocked = %orig(truePasscode);
+        if (secondaryUnlocked) {
             unlockedWithSecondary();
             return YES;
         }
     }
 
-    if (%orig) {
+    BOOL primaryUnlocked = %orig;
+    if (primaryUnlocked) {
         unlockedWithPrimary(passcode);
         return YES;
     }
@@ -339,9 +365,9 @@ static void unlockDevice(BOOL finishUIUnlock)
                 unlockedWithPrimary(passcode);
             }
         }
+    } else {
+        %orig;
     }
-
-    [passcode release];
 }
 %end
 %end
@@ -360,13 +386,15 @@ static void unlockDevice(BOOL finishUIUnlock)
     SBLockScreenManager * SBLSManager = [SBLockScreenManager sharedInstance];
 
     if (checkAttemptedUnlock(passcode)) {
-        if (%orig(truePasscode, arg2, arg3, arg4) && ![SBLSManager isUILocked]) {
+        BOOL secondaryUnlocked = %orig(truePasscode, arg2, arg3, arg4);
+        if (secondaryUnlocked && ![SBLSManager isUILocked]) {
             unlockedWithSecondary();
             return YES;
         }
     }
 
-    if (%orig && ![SBLSManager isUILocked]) {
+    BOOL primaryUnlocked = %orig;
+    if (primaryUnlocked && ![SBLSManager isUILocked]) {
         unlockedWithPrimary(passcode);
         return YES;
     }
@@ -387,6 +415,8 @@ static void unlockDevice(BOOL finishUIUnlock)
 {
     if (isTweakEnabled) {
         UILabel * label = MSHookIvar<UILabel *>(self, "_statusTitleView");
+        if (!label)
+            return %orig;
 
         if (!truePasscode || ![truePasscode length]) {
             label.text = @"PassBy requires passcode";
@@ -422,13 +452,28 @@ static void unlockDevice(BOOL finishUIUnlock)
 %hook SBLockScreenBiometricAuthenticationCoordinator
 - (BOOL)isUnlockingDisabled
 {
-    // if (!truePasscode || ![truePassocde length]) return true;  // Disallow biometrics when truePasscode is absent
-    return isTweakEnabled && disableBioDuringTime
-        ? (isTemporaryDisabled() || %orig)
-        : %orig;
+    if (isTweakEnabled && disableBioDuringTime) {
+        BOOL originallyDisabled = %orig;
+        return isTemporaryDisabled() || originallyDisabled;
+    }
+    return %orig;
 }
 %end
 
+
+
+
+// Gate for every automatic unlock: while SpringBoard is still coming up
+// after a respring, replaying the passcode wedges the startup sequence and
+// leaves the device spinning forever. This hook is the master switch.
+%hook SpringBoard
+- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
+{
+    BOOL result = %orig;
+    springBoardReady = YES;
+    return result;
+}
+%end
 
 
 
@@ -446,7 +491,7 @@ static BOOL isUsingWiFi()
         SBWiFiManager * SBWFM = [SBWiFiManager sharedInstance];
         if (!SBWFM)
             return NO;
-        
+
         NSString * SSID = [SBWFM currentNetworkName];
         return SSID
             && [SSID length]
@@ -454,28 +499,21 @@ static BOOL isUsingWiFi()
             && [allowedSSIDs containsObject:SHA1(SSID)];
     } else {
         NSDictionary * currentNetwork =
-            (__bridge NSDictionary *)
-            CNCopyCurrentNetworkInfo(CFSTR("en0"));
-        if (!currentNetwork) {
-            [currentNetwork release];
+            (NSDictionary *) CFBridgingRelease(CNCopyCurrentNetworkInfo(CFSTR("en0")));
+        if (!currentNetwork)
             return NO;
-        }
 
-        NSString * SSID = [currentNetwork objectForKey:@"SSID"];
-        BOOL result =  SSID
+        NSString * SSID = currentNetwork[@"SSID"];
+        return SSID
             && [SSID length]
             && allowedSSIDs
             && [allowedSSIDs containsObject:SHA1(SSID)];
-        [currentNetwork release];
-        return result;
     }
 }
 
 typedef struct __WiFiDeviceClient*  WiFiDeviceClientRef;
 typedef void (*WiFiLinkCallback_t)          (WiFiDeviceClientRef device, const void *object);
 typedef void (*WiFiRegisterLinkCallback_t)  (WiFiDeviceClientRef, WiFiLinkCallback_t,const void *);
-//ToDo Is this being erroneously called upon respring..?
-//Otherwise why is it no ptreserving the grace period?
 static void _WiFiLinkDidChange(WiFiDeviceClientRef, void const *)
 { if (allowWiFiGPWhileLocked) updateWiFiGracePeriod(); }
 
@@ -658,11 +696,21 @@ static void displayStatusChanged(
             dispatch_get_main_queue(),
             ^(void)
             {
+                // Never fire during SpringBoard startup (respring recovery).
+                // Fallback: if the didFinishLaunching hook ever goes missing
+                // on a future iOS, a fully materialized lock screen UI is
+                // itself proof that startup has finished.
+                if (!springBoardReady) {
+                    springBoardReady = isLockScreenUIReady();
+                    if (!springBoardReady)
+                        return;
+                }
+
                 if (getState("com.apple.iokit.hid.displayStatus")
                 && truePasscode
                 && [truePasscode length]
                 && isInGrace()
-                && ([[SBLockStateAggregator sharedInstance] lockState] & LOCKSTATE_NEEDSAUTH_MASK)
+                && isDeviceLocked()
                 ) {
                     unlockDevice(
                         dismissLS
@@ -681,7 +729,9 @@ static void lockstateChanged(
     CFStringRef name, void const * object, CFDictionaryRef userInfo)
 {
     if (isTweakEnabled) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0),
+        // Main queue: every other reader of the grace-period state runs on
+        // SpringBoard's main thread, so this serializes all access.
+        dispatch_async(dispatch_get_main_queue(),
             ^{
                 BOOL lockedState = isDeviceLocked();
 
@@ -689,7 +739,6 @@ static void lockstateChanged(
                     if (!lastLockedState) {
                         if (graceTimeoutTimer) {
                             [graceTimeoutTimer invalidate];
-                            [graceTimeoutTimer release];
                             graceTimeoutTimer = nil;
                         } else if (unlockedWithTimeout) {
                             invalidateAllGracePeriods();
@@ -703,7 +752,6 @@ static void lockstateChanged(
                         unlockedWithTimeout = NO;
                     }
                 } else if (lastLockedState) {
-                    [lastUnlock release];
                     lastUnlock = [NSDate new];
 
                     isDisabledUntilNext = NO;
@@ -730,9 +778,8 @@ static void passBySettingsChanged(
     CFStringRef name, void const * object, CFDictionaryRef userInfo)
 {
     NSDictionary * passByDict =
-        [   [NSDictionary alloc]
-            initWithContentsOfFile:@PLIST_PATH
-        ]?: [NSDictionary new];
+        [NSDictionary dictionaryWithContentsOfFile:@PLIST_PATH]
+        ?: [NSDictionary dictionary];
 
     isTweakEnabled          =   [[passByDict valueForKey:@"isEnabled"]              ?:@NO   boolValue];
     savePasscode            =   [[passByDict valueForKey:@"savePasscode"]           ?:@NO   boolValue];
@@ -810,22 +857,19 @@ static void passBySettingsChanged(
     && truePasscode
     && [truePasscode length] == passcodeLength
     ) {
-        savePasscodeToFile();
+        savePasscodeToFile(truePasscode);
     }
 
-    [passByDict release];
-
-    [gracePeriodEnds        release];
-    gracePeriodEnds         = nil;
+    @synchronized(GracePeriodSyncObj) {
+        gracePeriodEnds = nil;
+    }
 
     @synchronized(WiFiGracePeriodSyncObj) {
-        [gracePeriodWiFiEnds    release];
-        gracePeriodWiFiEnds     = nil;
+        gracePeriodWiFiEnds = nil;
     }
 
     @synchronized(BTGracePeriodSyncObj) {
-        [gracePeriodBTEnds      release];
-        gracePeriodBTEnds       = nil;
+        gracePeriodBTEnds = nil;
     }
 }
 
@@ -834,23 +878,17 @@ static void passByWiFiListChanged(
     CFStringRef name, void const * object, CFDictionaryRef userInfo)
 {
     NSDictionary * WiFiListDict =
-        [   [NSDictionary alloc]
-            initWithContentsOfFile:@WIFI_PLIST_PATH
-        ]?: [NSDictionary new];
+        [NSDictionary dictionaryWithContentsOfFile:@WIFI_PLIST_PATH]
+        ?: [NSDictionary dictionary];
 
     NSMutableArray * WiFiListArr =
-        [   [NSMutableArray alloc]
-            initWithCapacity:[WiFiListDict count]
-        ];
+        [NSMutableArray arrayWithCapacity:[WiFiListDict count]];
 
-    for(NSString * key in [WiFiListDict keyEnumerator])
+    for (NSString * key in WiFiListDict)
         if ([[WiFiListDict valueForKey:key] boolValue])
-            [WiFiListArr addObject:[key copy]];
+            [WiFiListArr addObject:key];
 
-    [allowedSSIDs release];
-    allowedSSIDs = [[NSArray alloc] initWithArray:WiFiListArr copyItems:YES];
-    [WiFiListDict release];
-    [WiFiListArr release];
+    allowedSSIDs = [WiFiListArr copy];
 }
 
 static void passByBTListChanged(
@@ -858,23 +896,17 @@ static void passByBTListChanged(
     CFStringRef name, void const * object, CFDictionaryRef userInfo)
 {
     NSDictionary * BTListDict =
-        [   [NSDictionary alloc]
-            initWithContentsOfFile:@BT_PLIST_PATH
-        ]?: [NSDictionary new];
+        [NSDictionary dictionaryWithContentsOfFile:@BT_PLIST_PATH]
+        ?: [NSDictionary dictionary];
 
     NSMutableArray * BTListArr =
-        [   [NSMutableArray alloc]
-            initWithCapacity:[BTListDict count]
-        ];
+        [NSMutableArray arrayWithCapacity:[BTListDict count]];
 
-    for(NSString * key in [BTListDict keyEnumerator])
+    for (NSString * key in BTListDict)
         if ([[BTListDict valueForKey:key] boolValue])
-            [BTListArr addObject:[key copy]];
+            [BTListArr addObject:key];
 
-    [allowedBTs release];
-    allowedBTs = [[NSArray alloc] initWithArray:BTListArr copyItems:YES];
-    [BTListDict release];
-    [BTListArr release];
+    allowedBTs = [BTListArr copy];
 }
 
 static void flipSwitchOn(
@@ -903,28 +935,34 @@ static void setDarwinNCObserver(CFNotificationCenterRef notification_center, CFN
 
 static void getUUID()
 {
-    unsigned char * buffer = (unsigned char *) malloc(16);
-    [   [[UIDevice currentDevice] identifierForVendor]
-        getUUIDBytes:buffer
-    ];
-    UUID = [[NSData alloc] initWithBytes:buffer length:16];
-    free(buffer);
+    unsigned char buffer[16];
+    [[[UIDevice currentDevice] identifierForVendor] getUUIDBytes:buffer];
+    UUID = [NSData dataWithBytes:buffer length:16];
 }
-
-#include "ActivatorIntegrationHelper.h"
 
 %ctor
 {
     %init;
 
+    GracePeriodSyncObj      = [NSObject new];
+    WiFiGracePeriodSyncObj  = [NSObject new];
+    BTGracePeriodSyncObj    = [NSObject new];
+    ManuallyDisabledSyncObj = [NSObject new];
+
     if (kCFCoreFoundationVersionNumber >= 1443.00) {
-        %init(iOS11andAbove);
+        // Probe before hooking: if the expected selector is gone on a future
+        // iOS release, degrade to a no-op instead of sending unknown selectors.
+        if (class_getInstanceMethod(objc_getClass("SBLockScreenManager"),
+                @selector(_attemptUnlockWithPasscode:mesa:finishUIUnlock:completion:)))
+            %init(iOS11andAbove);
+        else
+            NSLog(@"PassBy: SBLockScreenManager unlock selector not found, iOS11+ hooks disabled");
     } else if (kCFCoreFoundationVersionNumber >= 1348.00) {
         %init(iOS10);
     } else {
         %init(iOS9);
     }
-    
+
     {   // Set event-listener callbacks
         CFNotificationCenterRef notification_center = CFNotificationCenterGetDarwinNotifyCenter();
         setDarwinNCObserver(notification_center, passBySettingsChanged,  CFSTR("com.giorgioiavicoli.passby/reload"));
@@ -939,7 +977,7 @@ static void getUUID()
         setDarwinNCObserver(notification_center, displayStatusChanged,   CFSTR("com.apple.iokit.hid.displayStatus"));
         setDarwinNCObserver(notification_center, lockstateChanged,       CFSTR("com.apple.springboard.lockstate"));
     }
-    
+
     getUUID();
 
     passBySettingsChanged(NULL, NULL, NULL, NULL, NULL);
@@ -953,10 +991,7 @@ static void getUUID()
     isManuallyDisabled  = NO;
     isDisabledUntilNext = NO;
     lastLockedState     = YES;
-
-    WiFiGracePeriodSyncObj  = [NSObject new];
-    BTGracePeriodSyncObj    = [NSObject new];
-    ManuallyDisabledSyncObj = [NSObject new];
+    springBoardReady    = NO;
 
     if (savePasscode) {
         loadAllGracePeriods();
@@ -967,28 +1002,13 @@ static void getUUID()
         WiFiRegisterLinkCallback_t WiFiRegisterLinkCallback_sym;
         *(void **) (&WiFiRegisterLinkCallback_sym) = dlsym(wifiLibHandle, "WiFiDeviceClientRegisterLinkCallback");
         if(WiFiRegisterLinkCallback_sym) {
-            WiFiDeviceClientRef _device = 
+            WiFiDeviceClientRef _device =
                 MSHookIvar<WiFiDeviceClientRef>(
                     [SBWiFiManager sharedInstance], "_device"
                 );
             if (_device) {
                 (*WiFiRegisterLinkCallback_sym)(_device, _WiFiLinkDidChange, NULL);
             }
-        }
-    }
-
-    if (dlopen("/usr/lib/libactivator.dylib", RTLD_NOW)) {
-        Class LAActivatorClass = objc_getClass("LAActivator");
-        if (LAActivatorClass) {
-            static PassByListener * passbyActivatorListener = [PassByListener new];
-            [   [LAActivatorClass sharedInstance]
-                registerListener:passbyActivatorListener
-                forName:@PASSBY_UNLOCK_LALISTENER_NAME
-            ];
-            [   [LAActivatorClass sharedInstance]
-                registerListener:passbyActivatorListener
-                forName:@PASSBY_INVALIDATE_LALISTENER_NAME
-            ];
         }
     }
 }

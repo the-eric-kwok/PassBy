@@ -3,25 +3,24 @@
 
 static void updateGracePeriod()
 {
-    [gracePeriodEnds release];
-
-    gracePeriodEnds =
-        useGracePeriod
-            ? (gracePeriod
-                ? [[NSDate dateWithTimeIntervalSinceNow:gracePeriod] retain]
-                : [[NSDate distantFuture] copy]
-            ) : nil;
+    @synchronized(GracePeriodSyncObj) {
+        gracePeriodEnds =
+            useGracePeriod
+                ? (gracePeriod
+                    ? [NSDate dateWithTimeIntervalSinceNow:gracePeriod]
+                    : [NSDate distantFuture]
+                ) : nil;
+    }
 }
 
 static void updateWiFiGracePeriod()
 {
     @synchronized(WiFiGracePeriodSyncObj) {
-        [gracePeriodWiFiEnds release];
         gracePeriodWiFiEnds =
             useGracePeriodOnWiFi && isUsingWiFi()
                 ? (gracePeriodOnWiFi
-                    ? [[NSDate dateWithTimeIntervalSinceNow:gracePeriodOnWiFi] retain]
-                    : [[NSDate distantFuture] copy]
+                    ? [NSDate dateWithTimeIntervalSinceNow:gracePeriodOnWiFi]
+                    : [NSDate distantFuture]
                 ) : nil;
     }
 }
@@ -29,12 +28,11 @@ static void updateWiFiGracePeriod()
 static void updateBTGracePeriod()
 {
     @synchronized(BTGracePeriodSyncObj) {
-        [gracePeriodBTEnds release];
         gracePeriodBTEnds =
             useGracePeriodOnBT && isUsingBT()
                 ? (gracePeriodOnBT
-                    ? [[NSDate dateWithTimeIntervalSinceNow:gracePeriodOnBT] retain]
-                    : [[NSDate distantFuture] copy]
+                    ? [NSDate dateWithTimeIntervalSinceNow:gracePeriodOnBT]
+                    : [NSDate distantFuture]
                 ) : nil;
     }
 }
@@ -49,16 +47,15 @@ static void updateAllGracePeriods()
 
 static void invalidateAllGracePeriods()
 {
-    [gracePeriodEnds release];
-    gracePeriodEnds = nil;
+    @synchronized(GracePeriodSyncObj) {
+        gracePeriodEnds = nil;
+    }
 
     @synchronized(WiFiGracePeriodSyncObj) {
-        [gracePeriodWiFiEnds release];
         gracePeriodWiFiEnds = nil;
     }
 
     @synchronized(BTGracePeriodSyncObj) {
-        [gracePeriodBTEnds release];
         gracePeriodBTEnds = nil;
     }
 
@@ -68,21 +65,20 @@ static void invalidateAllGracePeriods()
 static void saveAllGracePeriods()
 {
     NSMutableDictionary * gracePeriods =
-        [   [NSMutableDictionary alloc]
-            initWithContentsOfFile:@GP_PLIST_PATH
-        ] ?:[NSMutableDictionary new];
+        [NSMutableDictionary dictionaryWithContentsOfFile:@GP_PLIST_PATH]
+        ?:[NSMutableDictionary dictionary];
 
-    if (useGracePeriod && gracePeriodEnds) {
-        NSData * GPData =
-            AES128Encrypt(
-                [stringFromDateAndFormat(gracePeriodEnds, @"ddMMyyyyHHmmss")
-                    dataUsingEncoding:NSUTF8StringEncoding
-                ], UUID
-            );
-        [gracePeriods
-            setObject:GPData
-            forKey:@"gp"
-        ];
+    @synchronized(GracePeriodSyncObj) {
+        if (useGracePeriod && gracePeriodEnds) {
+            NSData * GPData =
+                AES128Encrypt(
+                    [stringFromDateAndFormat(gracePeriodEnds, @"ddMMyyyyHHmmss")
+                        dataUsingEncoding:NSUTF8StringEncoding
+                    ], UUID
+                );
+            if (GPData)
+                gracePeriods[@"gp"] = GPData;
+        }
     }
 
     @synchronized(WiFiGracePeriodSyncObj) {
@@ -93,10 +89,8 @@ static void saveAllGracePeriods()
                         dataUsingEncoding:NSUTF8StringEncoding
                     ], UUID
                 );
-            [gracePeriods
-                setObject:WiFiGPData
-                forKey:@"gpwifi"
-            ];
+            if (WiFiGPData)
+                gracePeriods[@"gpwifi"] = WiFiGPData;
         }
     }
 
@@ -108,28 +102,23 @@ static void saveAllGracePeriods()
                         dataUsingEncoding:NSUTF8StringEncoding
                     ], UUID
                 );
-            [gracePeriods
-                setObject:BTGPData
-                forKey:@"gpbt"
-            ];
+            if (BTGPData)
+                gracePeriods[@"gpbt"] = BTGPData;
         }
     }
 
     [gracePeriods writeToFile:@(GP_PLIST_PATH) atomically:YES];
-    [gracePeriods release];
 }
 
 static void loadAllGracePeriods()
 {
     NSDictionary * gracePeriods =
-        [   [NSDictionary alloc]
-            initWithContentsOfFile:@GP_PLIST_PATH
-        ];
+        [NSDictionary dictionaryWithContentsOfFile:@GP_PLIST_PATH];
 
     if (gracePeriods) {
         NSData * GPData;
 
-        if (useGracePeriod 
+        if (useGracePeriod
         && (GPData = [gracePeriods valueForKey:@"gp"])
         ) {
             NSString * GPString =
@@ -138,17 +127,15 @@ static void loadAllGracePeriods()
                     encoding:NSUTF8StringEncoding
                 ];
 
-            gracePeriodEnds =
-                [   dateFromStringAndFormat(GPString, @"ddMMyyyyHHmmss")
-                    copy
-                ];
-
-            [GPString release];
+            @synchronized(GracePeriodSyncObj) {
+                gracePeriodEnds =
+                    dateFromStringAndFormat(GPString, @"ddMMyyyyHHmmss");
+            }
         }
 
         NSData * WiFiGPData;
 
-        if (useGracePeriodOnWiFi 
+        if (useGracePeriodOnWiFi
         && (WiFiGPData = [gracePeriods valueForKey:@"gpwifi"])
         ) {
             NSString * WiFiGPString =
@@ -159,12 +146,8 @@ static void loadAllGracePeriods()
 
             @synchronized(WiFiGracePeriodSyncObj) {
                 gracePeriodWiFiEnds =
-                    [   dateFromStringAndFormat(WiFiGPString, @"ddMMyyyyHHmmss")
-                        copy
-                    ];
+                    dateFromStringAndFormat(WiFiGPString, @"ddMMyyyyHHmmss");
             }
-
-            [WiFiGPString release];
         }
 
         NSData * BTGPData;
@@ -179,24 +162,15 @@ static void loadAllGracePeriods()
                 ];
             @synchronized(BTGracePeriodSyncObj) {
                 gracePeriodBTEnds =
-                    [   dateFromStringAndFormat(BTPString, @"ddMMyyyyHHmmss")
-                        copy
-                    ];
+                    dateFromStringAndFormat(BTPString, @"ddMMyyyyHHmmss");
             }
-            [BTPString release];
         }
     }
-
-    [gracePeriods release];
-
 }
+
 
 static void refreshDisabledInterval()
 {
-    [currentDay         release];
-    [disableFromDate    release];
-    [disableToDate      release];
-
     currentDay = [NSDate new];
 
     disableFromDate =
@@ -257,9 +231,12 @@ static BOOL isInGrace()
     if (watchAutoUnlock && isUsingWatch())
         return YES;
 
-    if (gracePeriodEnds
-    && [gracePeriodEnds compare:[NSDate date]] == NSOrderedDescending)
-        return YES;
+    @synchronized(GracePeriodSyncObj) {
+        if (gracePeriodEnds
+        && [gracePeriodEnds compare:[NSDate date]] == NSOrderedDescending
+        )
+            return YES;
+    }
 
     @synchronized(WiFiGracePeriodSyncObj) {
         if (gracePeriodWiFiEnds
@@ -268,7 +245,6 @@ static BOOL isInGrace()
         ) {
             return YES;
         } else {
-            [gracePeriodWiFiEnds release];
             gracePeriodWiFiEnds = nil;
         }
     }
@@ -280,7 +256,6 @@ static BOOL isInGrace()
         ) {
             return YES;
         } else {
-            [gracePeriodBTEnds release];
             gracePeriodBTEnds = nil;
         }
     }

@@ -5,24 +5,16 @@ NSString * stringFromDateAndFormat(NSDate * date, NSString * format)
 {
     NSDateFormatter *formatter = [NSDateFormatter new];
     [formatter setLocale:[NSLocale currentLocale]];
-    [formatter setTimeStyle:NSDateFormatterShortStyle];
     [formatter setDateFormat:format];
-
-    NSString * string = [formatter stringFromDate:date];
-    [formatter release];
-    return string;
+    return [formatter stringFromDate:date];
 }
 
 NSDate * dateFromStringAndFormat(NSString * string, NSString * format)
 {
     NSDateFormatter *formatter = [NSDateFormatter new];
     [formatter setLocale:[NSLocale currentLocale]];
-    [formatter setTimeStyle:NSDateFormatterShortStyle];
     [formatter setDateFormat:format];
-
-    NSDate * date = [formatter dateFromString:string];
-    [formatter release];
-    return date;
+    return [formatter dateFromString:string];
 }
 
 BOOL evalDateTimeHelper(NSString * format, char d0, char d1, BOOL reversed)
